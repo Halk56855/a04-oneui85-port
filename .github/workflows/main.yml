@@ -71,7 +71,7 @@ jobs:
       - name: Adapt repo scripts & patches to Galaxy A04
         run: |
           set -e
-          mkdir -p ~/a04port/work/port ~/a04port/work/out ~/a04port/work/stock/super ~/a04port/logs ~/work/sys85/system ~/work/sys85/config ~/work/vendor_src
+          mkdir -p ~/a04port/work/port ~/a04port/work/out ~/a04port/work/kernel ~/a04port/work/stock/super ~/a04port/release ~/a04port/logs ~/work/sys85/system ~/work/sys85/config ~/work/vendor_src
           cp -r "$GITHUB_WORKSPACE/repo/." ~/a04port/work/adapted_repo/
 
           find ~/a04port/work/adapted_repo -type f \
@@ -106,7 +106,7 @@ jobs:
           fi
 
           [ -n "$(ls -A ~/work/sys85/system 2>/dev/null)" ] && mkdir -p ~/a04port/work/port/system && cp -r ~/work/sys85/system/. ~/a04port/work/port/system/
-          [ -n "$(ls -A ~/work/vendor_src 2>/dev/null)" ] && cp -r ~/work/vendor_src/. ~/a04port/work/port/vendor/
+          [ -n "$(ls -A ~/work/vendor_src 2>/dev/null)" ] && cp -r ~/a04port/work/vendor_src/. ~/a04port/work/port/vendor/
 
           find ~/a04port/work/adapted_repo ~/a04_trees/device -name "*system*file_contexts*" -exec cp {} ~/work/sys85/config/system_file_contexts \; 2>/dev/null || true
           find ~/a04port/work/adapted_repo ~/a04_trees/device -name "*vendor*file_contexts*" -exec cp {} ~/work/sys85/config/vendor_file_contexts \; 2>/dev/null || true
@@ -200,10 +200,37 @@ jobs:
                 (cd ~/work/ramdisk_tmp && find . | cpio -o -H newc | gzip > ~/work/ramdisk.cpio.gz)
                 mkbootimg --kernel "$KIMG" --ramdisk ~/work/ramdisk.cpio.gz --header_version 2 --os_version 16.0.0 --os_patch_level 2026-11 -o ~/a04port/work/out/boot.img || true
               fi
+              [ -f ~/a04port/work/out/boot.img ] && cp ~/a04port/work/out/boot.img ~/a04port/work/kernel/boot.img
+              find out/arch/arm64/boot -name "*dtbo*.img" -exec cp {} ~/a04port/work/kernel/dtbo.img \; 2>/dev/null || true
             else
               echo "No A04/MT6765 defconfig found automatically; inspect arch/arm64/configs"
               exit 1
             fi
+          fi
+
+      - name: Run modified make_zip.py for Galaxy A04
+        run: |
+          set -e
+          mkdir -p ~/a04port/work/kernel ~/a04port/release
+
+          [ -f ~/a04port/work/out/boot.img ] && [ ! -f ~/a04port/work/kernel/boot.img ] && cp ~/a04port/work/out/boot.img ~/a04port/work/kernel/boot.img
+          find ~/a04_trees/device ~/a04_trees/kernel -name "*dtbo*.img" -exec cp {} ~/a04port/work/kernel/dtbo.img \; 2>/dev/null || true
+
+          [ -f ~/a04port/work/adapted_repo/installer/update-binary ] && cp ~/a04port/work/adapted_repo/installer/update-binary ~/a04port/release/update-binary
+          [ -f ~/a04port/work/adapted_repo/NOTICE.txt ] && cp ~/a04port/work/adapted_repo/NOTICE.txt ~/a04port/release/NOTICE.txt
+
+          if [ -f ~/a04port/work/out/super.raw.img ] && [ -f ~/a04port/work/kernel/boot.img ] && [ -f ~/a04port/release/update-binary ]; then
+            MAKE_ZIP=$(find ~/a04port/work/adapted_repo -name "make_zip.py" | head -n 1)
+            if [ -n "$MAKE_ZIP" ]; then
+              chmod +x "$MAKE_ZIP"
+              python3 "$MAKE_ZIP" ~/a04port/release/A04_OneUI8.5_Port.zip
+              cp ~/a04port/release/A04_OneUI8.5_Port.zip ~/a04port/work/out/
+            else
+              echo "make_zip.py not found in adapted_repo"
+              exit 1
+            fi
+          else
+            echo "Skip make_zip.py: missing super.raw.img, boot.img, or update-binary"
           fi
 
       - name: Upload build outputs
