@@ -1,4 +1,4 @@
-name: Build One UI 8.5 Port for Galaxy A04
+name: Build One UI 8.5 Port for Galaxy A04 (SM-A045F)
 
 on:
   workflow_dispatch:
@@ -11,6 +11,10 @@ on:
         description: 'Optional direct URL to prepared One UI 8.5 system archive (.tar.gz / .zip / .img)'
         required: false
         default: ''
+      stock_super_url:
+        description: 'Optional direct URL to stock A04 super.img (.img / .lz4 / .tar.gz / .zip) to auto-detect super size'
+        required: false
+        default: ''
       super_size:
         description: 'Super partition size in bytes (default: 8053063680)'
         required: false
@@ -19,6 +23,14 @@ on:
         description: 'Dynamic partitions group size limit in bytes (default: 8048869376)'
         required: false
         default: '8048869376'
+      super_group_name:
+        description: 'Dynamic partitions group name (default: mtk_dynamic_partitions)'
+        required: false
+        default: 'mtk_dynamic_partitions'
+      strict_verify:
+        description: 'Fail workflow if verify_build.sh reports failed checks (true | false)'
+        required: false
+        default: 'false'
 
 jobs:
   build:
@@ -27,19 +39,19 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout Halk56855/a71-oneui85-port
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           path: repo
 
-      - name: Install build tools
+      - name: Install required packages
         run: |
           set -e
           sudo apt-get update
           sudo apt-get install -y \
             git bc bison flex libssl-dev make libc6-dev libncurses5-dev \
             binutils-aarch64-linux-gnu erofs-utils android-sdk-libsparse-utils \
-            mkbootimg cpio zip unzip curl wget xz-utils
+            mkbootimg cpio zip unzip curl wget xz-utils lz4 file attr python3
 
       - name: Checkout Galaxy A04 trees
         run: |
@@ -49,7 +61,7 @@ jobs:
           git clone --depth=1 https://github.com/A04-Trees-and-ROMs/android_vendor_samsung_a04.git ~/a04_trees/vendor
           git clone --depth=1 https://github.com/A04-Trees-and-ROMs/android_kernel_samsung_a04.git ~/a04_trees/kernel
 
-      - name: Download GCC & Clang Toolchain
+      - name: Download GCC & Clang toolchains
         run: |
           set -e
           mkdir -p ~/a04_trees/toolchain/gcc ~/a04_trees/toolchain/clang/host/linux-x86/clang-r383902
@@ -68,10 +80,22 @@ jobs:
             mv host/linux-x86/clang-r383902/clang-r383902/* host/linux-x86/clang-r383902/
           fi
 
-      - name: Adapt repo scripts & patches to Galaxy A04
+      - name: Prepare workspace & adapt scripts/patches to Galaxy A04
         run: |
           set -e
-          mkdir -p ~/a04port/work/port ~/a04port/work/out ~/a04port/work/kernel ~/a04port/work/stock/super ~/a04port/release ~/a04port/logs ~/work/sys85/system ~/work/sys85/config ~/work/vendor_src
+          mkdir -p \
+            ~/a04port/work/port/system \
+            ~/a04port/work/port/vendor \
+            ~/a04port/work/port/product \
+            ~/a04port/work/out \
+            ~/a04port/work/kernel \
+            ~/a04port/work/stock/super \
+            ~/a04port/release \
+            ~/a04port/logs \
+            ~/work/sys85/system \
+            ~/work/sys85/config \
+            ~/work/vendor_src
+
           cp -r "$GITHUB_WORKSPACE/repo/." ~/a04port/work/adapted_repo/
 
           find ~/a04port/work/adapted_repo -type f \
@@ -86,9 +110,28 @@ jobs:
               -e 's/sm7150/mt6765/g' \
               -e 's/SM7150/MT6765/g' {} + 2>/dev/null || true
 
-          if [ -d ~/a04port/work/adapted_repo/patches/config ]; then
-            find ~/a04_trees/device -name "*fstab*" -exec cp {} ~/a04port/work/adapted_repo/patches/config/ \; 2>/dev/null || true
-            find ~/a04_trees/device -name "*vintf*" -exec cp {} ~/a04port/work/adapted_repo/patches/config/ \; 2>/dev/null || true
+          if [ -n "${{ inputs.stock_super_url }}" ]; then
+            mkdir -p ~/work/dl_stock
+            wget -q --show-progress "${{ inputs.stock_super_url }}" -O ~/work/dl_stock/stock_pkg
+            case "${{ inputs.stock_super_url }}" in
+              *.zip) unzip -q ~/work/dl_stock/stock_pkg -d ~/work/dl_stock/unpacked || true ;;
+              *.tar.gz|*.tgz) mkdir -p ~/work/dl_stock/unpacked && tar -xzf ~/work/dl_stock/stock_pkg -C ~/work/dl_stock/unpacked || true ;;
+              *.tar.xz) mkdir -p ~/work/dl_stock/unpacked && tar -xJf ~/work/dl_stock/stock_pkg -C ~/work/dl_stock/unpacked || true ;;
+              *.lz4) lz4 -d -f ~/work/dl_stock/stock_pkg ~/work/dl_stock/super.img || true ;;
+              *) cp ~/work/dl_stock/stock_pkg ~/work/dl_stock/super.img ;;
+            esac
+            FOUND_SUP=$(find ~/work/dl_stock -name "*super*.img*" -o -name "super*" | head -n 1)
+            if [ -n "$FOUND_SUP" ]; then
+              case "$FOUND_SUP" in
+                *.lz4) lz4 -d -f "$FOUND_SUP" ~/work/dl_stock/super_dec.img && FOUND_SUP=~/work/dl_stock/super_dec.img ;;
+              esac
+              if file "$FOUND_SUP" | grep -qi "sparse"; then
+                simg2img "$FOUND_SUP" ~/a04port/work/stock/super/super_stock.raw.img
+              else
+                cp "$FOUND_SUP" ~/a04port/work/stock/super/super_stock.raw.img
+              fi
+              command -v lpdump >/dev/null 2>&1 && lpdump ~/a04port/work/stock/super/super_stock.raw.img > ~/a04port/logs/stock-super-lpdump.txt || true
+            fi
           fi
 
           if [ -n "${{ inputs.system_port_url }}" ]; then
@@ -105,8 +148,9 @@ jobs:
             cp -r ~/a04_trees/vendor/proprietary/vendor/* ~/work/vendor_src/
           fi
 
-          [ -n "$(ls -A ~/work/sys85/system 2>/dev/null)" ] && mkdir -p ~/a04port/work/port/system && cp -r ~/work/sys85/system/. ~/a04port/work/port/system/
-          [ -n "$(ls -A ~/work/vendor_src 2>/dev/null)" ] && cp -r ~/a04port/work/vendor_src/. ~/a04port/work/port/vendor/
+          [ -n "$(ls -A ~/work/sys85/system 2>/dev/null)" ] && cp -a ~/work/sys85/system/. ~/a04port/work/port/system/
+          [ -n "$(ls -A ~/work/vendor_src 2>/dev/null)" ] && cp -a ~/work/vendor_src/. ~/a04port/work/port/vendor/
+          find ~/a04port/work/port -type f \( -name "*.diff" -o -name "*.smali" \) -delete
 
           find ~/a04port/work/adapted_repo ~/a04_trees/device -name "*system*file_contexts*" -exec cp {} ~/work/sys85/config/system_file_contexts \; 2>/dev/null || true
           find ~/a04port/work/adapted_repo ~/a04_trees/device -name "*vendor*file_contexts*" -exec cp {} ~/work/sys85/config/vendor_file_contexts \; 2>/dev/null || true
@@ -118,6 +162,13 @@ jobs:
         run: |
           set -e
           TARGET="${{ inputs.target }}"
+          SUPER_SIZE="${{ inputs.super_size }}"
+          if [ -f ~/a04port/work/stock/super/super_stock.raw.img ]; then
+            SUPER_SIZE=$(stat -c %s ~/a04port/work/stock/super/super_stock.raw.img)
+            echo "Using detected stock super size: $SUPER_SIZE bytes"
+          fi
+          GROUP_LIMIT="${{ inputs.super_group_limit }}"
+          GROUP_NAME="${{ inputs.super_group_name }}"
           MKFS=$(command -v mkfs.erofs)
 
           build_partition_erofs() {
@@ -135,10 +186,10 @@ jobs:
           }
 
           if [ "$TARGET" = "system" ] || [ "$TARGET" = "all" ]; then
-            build_partition_erofs "system" "$HOME/work/sys85/system" "$HOME/work/sys85/config/system_file_contexts" "$HOME/a04port/work/out/system.img"
+            build_partition_erofs "system" "$HOME/a04port/work/port/system" "$HOME/work/sys85/config/system_file_contexts" "$HOME/a04port/work/out/system.img"
           fi
           if [ "$TARGET" = "vendor" ] || [ "$TARGET" = "all" ]; then
-            build_partition_erofs "vendor" "$HOME/work/vendor_src" "$HOME/work/sys85/config/vendor_file_contexts" "$HOME/a04port/work/out/vendor.img"
+            build_partition_erofs "vendor" "$HOME/a04port/work/port/vendor" "$HOME/work/sys85/config/vendor_file_contexts" "$HOME/a04port/work/out/vendor.img"
           fi
           if [ "$TARGET" = "product" ] || [ "$TARGET" = "all" ]; then
             mkdir -p ~/work/emptyprod
@@ -147,22 +198,20 @@ jobs:
           fi
 
           if [ "$TARGET" = "all" ] && command -v lpmake >/dev/null 2>&1 && [ -f ~/a04port/work/out/system.img ] && [ -f ~/a04port/work/out/vendor.img ] && [ -f ~/a04port/work/out/product.img ]; then
-            SUPER_SIZE="${{ inputs.super_size }}"
-            GROUP_LIMIT="${{ inputs.super_group_limit }}"
             TOTAL_SZ=$(( $(stat -c %s ~/a04port/work/out/system.img) + $(stat -c %s ~/a04port/work/out/vendor.img) + $(stat -c %s ~/a04port/work/out/product.img) ))
             if [ "$TOTAL_SZ" -le "$GROUP_LIMIT" ]; then
               lpmake --metadata-size 65536 --metadata-slots 2 --super-name super \
-                --device "super:${SUPER_SIZE}" --group "mtk_dynamic_partitions:${GROUP_LIMIT}" \
-                --partition system:readonly:$(stat -c %s ~/a04port/work/out/system.img):mtk_dynamic_partitions --image system="$HOME/a04port/work/out/system.img" \
-                --partition vendor:readonly:$(stat -c %s ~/a04port/work/out/vendor.img):mtk_dynamic_partitions --image vendor="$HOME/a04port/work/out/vendor.img" \
-                --partition product:readonly:$(stat -c %s ~/a04port/work/out/product.img):mtk_dynamic_partitions --image product="$HOME/a04port/work/out/product.img" \
+                --device "super:${SUPER_SIZE}" --group "${GROUP_NAME}:${GROUP_LIMIT}" \
+                --partition system:readonly:$(stat -c %s ~/a04port/work/out/system.img):"$GROUP_NAME" --image system="$HOME/a04port/work/out/system.img" \
+                --partition vendor:readonly:$(stat -c %s ~/a04port/work/out/vendor.img):"$GROUP_NAME" --image vendor="$HOME/a04port/work/out/vendor.img" \
+                --partition product:readonly:$(stat -c %s ~/a04port/work/out/product.img):"$GROUP_NAME" --image product="$HOME/a04port/work/out/product.img" \
                 --output ~/a04port/work/out/super.raw.img
             else
               echo "Skip super.raw.img: partitions size ($TOTAL_SZ) exceeds group limit ($GROUP_LIMIT)"
             fi
           fi
 
-      - name: Build A04 Kernel & boot.img
+      - name: Build Galaxy A04 Kernel & boot.img
         run: |
           set -e
           TARGET="${{ inputs.target }}"
@@ -208,7 +257,7 @@ jobs:
             fi
           fi
 
-      - name: Run modified make_zip.py for Galaxy A04
+      - name: Run make_zip.py for Galaxy A04
         run: |
           set -e
           mkdir -p ~/a04port/work/kernel ~/a04port/release
@@ -217,7 +266,8 @@ jobs:
           find ~/a04_trees/device ~/a04_trees/kernel -name "*dtbo*.img" -exec cp {} ~/a04port/work/kernel/dtbo.img \; 2>/dev/null || true
 
           [ -f ~/a04port/work/adapted_repo/installer/update-binary ] && cp ~/a04port/work/adapted_repo/installer/update-binary ~/a04port/release/update-binary
-          [ -f ~/a04port/work/adapted_repo/NOTICE.txt ] && cp ~/a04port/work/adapted_repo/NOTICE.txt ~/a04port/release/NOTICE.txt
+          [ -f ~/a04port/work/adapted_repo/installer/NOTICE.txt ] && cp ~/a04port/work/adapted_repo/installer/NOTICE.txt ~/a04port/release/NOTICE.txt
+          [ -f ~/a04port/work/adapted_repo/NOTICE.txt ] && [ ! -f ~/a04port/release/NOTICE.txt ] && cp ~/a04port/work/adapted_repo/NOTICE.txt ~/a04port/release/NOTICE.txt
 
           if [ -f ~/a04port/work/out/super.raw.img ] && [ -f ~/a04port/work/kernel/boot.img ] && [ -f ~/a04port/release/update-binary ]; then
             MAKE_ZIP=$(find ~/a04port/work/adapted_repo -name "make_zip.py" | head -n 1)
@@ -233,7 +283,33 @@ jobs:
             echo "Skip make_zip.py: missing super.raw.img, boot.img, or update-binary"
           fi
 
-      - name: Upload build outputs
+      - name: Run verify_build.sh for Galaxy A04
+        run: |
+          VERIFY_SCRIPT=$(find ~/a04port/work/adapted_repo -name "verify_build.sh" | head -n 1)
+          SUPER_SIZE="${{ inputs.super_size }}"
+          if [ -f ~/a04port/work/stock/super/super_stock.raw.img ]; then
+            SUPER_SIZE=$(stat -c %s ~/a04port/work/stock/super/super_stock.raw.img)
+          fi
+          if [ -n "$VERIFY_SCRIPT" ] && [ -f ~/a04port/work/out/super.raw.img ]; then
+            chmod +x "$VERIFY_SCRIPT"
+            sudo HOME="$HOME" \
+              W="$HOME/a04port/work" \
+              OUT="$HOME/a04port/work/out" \
+              SUPER="$HOME/a04port/work/out/super.raw.img" \
+              EXPECTED_SUPER_SIZE="$SUPER_SIZE" \
+              EXPECTED_GROUP_LIMIT="${{ inputs.super_group_limit }}" \
+              EXPECTED_GROUP_NAME="${{ inputs.super_group_name }}" \
+              bash "$VERIFY_SCRIPT" "$HOME/a04port/release/A04_OneUI8.5_Port.zip" | tee ~/a04port/logs/verify_build.log
+            RC=${PIPESTATUS[0]}
+            cp ~/a04port/logs/verify_build.log ~/a04port/work/out/ 2>/dev/null || true
+            if [ "$RC" -ne 0 ] && [ "${{ inputs.strict_verify }}" = "true" ]; then
+              exit "$RC"
+            fi
+          else
+            echo "Skip verify_build.sh: script or super.raw.img not available"
+          fi
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v5
         with:
           name: a04-oneui85-build-${{ inputs.target }}
