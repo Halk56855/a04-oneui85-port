@@ -16,11 +16,11 @@ on:
         required: true
         default: 'ACR'
       stock_imei:
-        description: 'Optional IMEI if required by firmware/samloader-rs'
+        description: 'Optional IMEI if required by firmware/samloader'
         required: false
         default: ''
       stock_serial:
-        description: 'Optional Serial if required by firmware/samloader-rs'
+        description: 'Optional Serial if required by firmware/samloader'
         required: false
         default: ''
       system_port_url:
@@ -66,16 +66,18 @@ jobs:
             mkbootimg cpio zip unzip curl wget xz-utils lz4 file attr python3 \
             cargo rustc pkg-config libssl-dev
 
-      - name: Install samloader-rs from topjohnwu/samloader-rs.git
+      - name: Install samloader package from topjohnwu/samloader-rs.git
         run: |
           set -e
-          cargo install --git https://github.com/topjohnwu/samloader-rs.git --locked || \
-          cargo install --git https://github.com/topjohnwu/samloader-rs.git
           export PATH="$HOME/.cargo/bin:$PATH"
-          command -v samloader-rs
-          samloader-rs --help || true
+          if ! command -v samloader >/dev/null 2>&1 && ! command -v samloader-rs >/dev/null 2>&1; then
+            cargo install --git https://github.com/topjohnwu/samloader-rs.git samloader --locked || \
+            cargo install --git https://github.com/topjohnwu/samloader-rs.git samloader
+          fi
+          command -v samloader || command -v samloader-rs
+          (samloader --help || samloader-rs --help) || true
 
-      - name: Download & extract stock A04 firmware via samloader-rs
+      - name: Download & extract stock A04 firmware via samloader
         env:
           SAMLOADER_IMEI: "${{ secrets.SAMLOADER_IMEI }}"
           SAMLOADER_SERIAL: "${{ secrets.SAMLOADER_SERIAL }}"
@@ -84,6 +86,7 @@ jobs:
           export PATH="$HOME/.cargo/bin:$PATH"
           mkdir -p ~/a04_stock/dl ~/a04_stock/extracted ~/a04port/work/kernel ~/a04port/work/stock/super ~/a04port/logs
 
+          SAM_BIN=$(command -v samloader || command -v samloader-rs)
           MODEL="${{ inputs.stock_model }}"
           CSC="${{ inputs.stock_csc }}"
           IMEI="${{ inputs.stock_imei || env.SAMLOADER_IMEI }}"
@@ -91,15 +94,17 @@ jobs:
 
           cd ~/a04_stock/dl
 
-          if [ -n "$IMEI" ] && [ -n "$SERIAL" ]; then
-            samloader-rs download -m "$MODEL" -r "$CSC" -i "$IMEI" -s "$SERIAL" -O . || \
-            samloader-rs -m "$MODEL" -r "$CSC" -i "$IMEI" -s "$SERIAL" download -o . || true
-          elif [ -n "$IMEI" ]; then
-            samloader-rs download -m "$MODEL" -r "$CSC" -i "$IMEI" -O . || \
-            samloader-rs -m "$MODEL" -r "$CSC" -i "$IMEI" download -o . || true
-          else
-            samloader-rs download -m "$MODEL" -r "$CSC" -O . || \
-            samloader-rs -m "$MODEL" -r "$CSC" download -o . || true
+          if [ -n "$SAM_BIN" ]; then
+            if [ -n "$IMEI" ] && [ -n "$SERIAL" ]; then
+              "$SAM_BIN" download -m "$MODEL" -r "$CSC" -i "$IMEI" -s "$SERIAL" -O . || \
+              "$SAM_BIN" -m "$MODEL" -r "$CSC" -i "$IMEI" -s "$SERIAL" download -o . || true
+            elif [ -n "$IMEI" ]; then
+              "$SAM_BIN" download -m "$MODEL" -r "$CSC" -i "$IMEI" -O . || \
+              "$SAM_BIN" -m "$MODEL" -r "$CSC" -i "$IMEI" download -o . || true
+            else
+              "$SAM_BIN" download -m "$MODEL" -r "$CSC" -O . || \
+              "$SAM_BIN" -m "$MODEL" -r "$CSC" download -o . || true
+            fi
           fi
 
           for f in ~/a04_stock/dl/*; do
@@ -221,7 +226,7 @@ jobs:
           SUPER_SIZE="${{ inputs.super_size }}"
           if [ -f ~/a04port/work/stock/super/super_stock.raw.img ]; then
             SUPER_SIZE=$(stat -c %s ~/a04port/work/stock/super/super_stock.raw.img)
-            echo "Using stock super size from samloader-rs firmware: $SUPER_SIZE bytes"
+            echo "Using stock super size from samloader firmware: $SUPER_SIZE bytes"
           fi
           GROUP_LIMIT="${{ inputs.super_group_limit }}"
           GROUP_NAME="${{ inputs.super_group_name }}"
