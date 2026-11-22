@@ -1,11 +1,12 @@
---- a/NfcSettings.smali
-+++ b/NfcSettings.smali
-@@ -3744,7 +3744,7 @@
-     .line 394
-     .line 395
-     :goto_3
--    const-string v1, "1"
-+    const-string v1, "2"
+--- a/smali/com/android/settings/nfc/NfcSettings.smali
++++ b/smali/com/android/settings/nfc/NfcSettings.smali
+@@ -1,8 +1,9 @@
+ # NfcSettings antenna position adjustment for Galaxy A04 (SM-A045F)
+ .method protected getAntennaPositionSummary()Ljava/lang/String;
+     .locals 1
  
-     .line 396
-     .line 397
+-    const-string v0, "Back center / A71"
+-    return-object v0
++    const-string v0, "Back upper / A04"
++    return-object v0
+ .end method
