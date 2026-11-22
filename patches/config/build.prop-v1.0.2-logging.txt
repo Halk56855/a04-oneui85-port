@@ -1,4 +1,5 @@
-# v1.0.2: removed from /system/build.prop (debug leftovers from v1.0)
-# Samsung's normal persist.log.semlevel=0xFFFFFF00 applies again.
-ro.logd.kernel=true
-persist.log.semlevel=0xFFFFFFFF
+# One UI 8.5 port build & debug props for Galaxy A04 (SM-A045F / MT6765)
+ro.product.model=SM-A045F
+ro.product.device=a04
+persist.logd.size=262144
+ro.adb.secure=1
