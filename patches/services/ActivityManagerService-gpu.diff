@@ -1,32 +1,16 @@
---- a/ActivityManagerService.smali
-+++ b/ActivityManagerService.smali
-@@ -39998,12 +39998,12 @@
-     .line 2940
-     :cond_4c
-     :goto_3b
--    invoke-static {}, Landroid/os/Debug;->getGpuTotalUsageKb()J
-+    const-wide/16 v9, -0x1
+--- a/smali/com/android/server/am/ActivityManagerService.smali
++++ b/smali/com/android/server/am/ActivityManagerService.smali
+@@ -1,10 +1,12 @@
+ # ActivityManagerService GPU memory handling guard for Galaxy A04 (MT6765 / PowerVR GE8320)
+ .method private handleGpuMemoryPressure(I)V
+     .locals 1
+     .param p1, "level"    # I
  
-     .line 2941
-     .line 2942
-     .line 2943
--    move-result-wide v9
-+
- 
-     .line 2944
-     cmp-long v3, v9, v23
-@@ -40014,12 +40014,12 @@
- 
-     .line 2947
-     .line 2948
--    invoke-static {}, Landroid/os/Debug;->getGpuPrivateMemoryKb()J
-+    const-wide/16 v13, -0x1
- 
-     .line 2949
-     .line 2950
-     .line 2951
--    move-result-wide v13
-+
- 
-     .line 2952
-     cmp-long v3, v13, v23
+-    invoke-direct {p0, p1}, Lcom/android/server/am/ActivityManagerService;->triggerLowMemoryKill(I)V
+-    return-void
++    # Guard against aggressive process kills on A04 (a04)
++    if-gtz p1, :cond_skip
++    invoke-direct {p0, p1}, Lcom/android/server/am/ActivityManagerService;->triggerLowMemoryKill(I)V
++    :cond_skip
++    return-void
+ .end method
