@@ -1,2 +1,12 @@
-17:    <Preference android:title="One UI 8.5 for Galaxy A71 4G (SM-A715F)" android:key="a71_port_info" android:summary="Built by saantiqz, with the help of Claude by Anthropic." settings:controller="com.saantiqz.a71port.PortInfoController" />
-18:    <Preference android:title="Port Version" android:key="a71_port_version" android:summary="1.0.2" />
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Galaxy A04 (SM-A045F) One UI 8.5 port software info rows -->
+    <Preference
+        android:key="a04_port_version"
+        android:title="One UI 8.5 Port (A04)"
+        android:summary="SM-A045F / MT6765" />
+    <Preference
+        android:key="a04_port_device"
+        android:title="Target device"
+        android:summary="Galaxy A04 (a04)" />
+</PreferenceScreen>
