@@ -1,46 +1,14 @@
---- a/StatsPullAtomService.smali
-+++ b/StatsPullAtomService.smali
-@@ -11757,12 +11757,13 @@
-     move-result-object v1
+--- a/smali_classes2/com/android/server/stats/pull/StatsPullAtomService.smali
++++ b/smali_classes2/com/android/server/stats/pull/StatsPullAtomService.smali
+@@ -1,10 +1,12 @@
+ # StatsPullAtomService GPU stats guard for Galaxy A04 (MT6765)
+ .method private pullGpuStats()I
+     .locals 1
  
-     .line 15
--    invoke-static {}, Lcom/android/internal/os/KernelAllocationStats;->getGpuAllocations()[Lcom/android/internal/os/KernelAllocationStats$ProcessGpuMem;
-+    const/4 v2, 0x0
-+    new-array v2, v2, [Lcom/android/internal/os/KernelAllocationStats$ProcessGpuMem;
- 
-     .line 16
-     .line 17
-     .line 18
--    move-result-object v2
-+
- 
-     .line 19
-     new-instance v3, Landroid/util/SparseIntArray;
-@@ -12479,23 +12480,23 @@
-     long-to-int v7, v0
- 
-     .line 6
--    invoke-static {}, Landroid/os/Debug;->getGpuTotalUsageKb()J
-+    const-wide/16 v0, -0x1
- 
-     .line 7
-     .line 8
-     .line 9
--    move-result-wide v0
-+
- 
-     .line 10
-     long-to-int v9, v0
- 
-     .line 11
--    invoke-static {}, Landroid/os/Debug;->getGpuPrivateMemoryKb()J
-+    const-wide/16 v0, -0x1
- 
-     .line 12
-     .line 13
-     .line 14
--    move-result-wide v0
-+
- 
-     .line 15
-     long-to-int v10, v0
+-    invoke-direct {p0}, Lcom/android/server/stats/pull/StatsPullAtomService;->nativePullGpuStats()I
+-    move-result v0
+-    return v0
++    # Avoid native GPU pull mismatch on A04 (a04)
++    const/4 v0, 0x0
++    return v0
+ .end method
