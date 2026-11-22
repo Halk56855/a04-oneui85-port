@@ -1,32 +1,16 @@
---- a/ActivityManagerService$MainHandler$1.smali
-+++ b/ActivityManagerService$MainHandler$1.smali
-@@ -2346,12 +2346,12 @@
-     .line 1163
-     :cond_1e
-     :goto_d
--    invoke-static {}, Landroid/os/Debug;->getGpuTotalUsageKb()J
-+    const-wide/16 v13, -0x1
+--- a/smali/com/android/server/am/ActivityManagerService$MainHandler.smali
++++ b/smali/com/android/server/am/ActivityManagerService$MainHandler.smali
+@@ -1,10 +1,12 @@
+ # AMS MainHandler GPU message guard for Galaxy A04 (SM-A045F / MT6765)
+ .method public handleMessage(Landroid/os/Message;)V
+     .locals 2
+     .param p1, "msg"    # Landroid/os/Message;
  
-     .line 1164
-     .line 1165
-     .line 1166
--    move-result-wide v13
-+
- 
-     .line 1167
-     cmp-long v5, v13, v17
-@@ -2362,12 +2362,12 @@
- 
-     .line 1170
-     .line 1171
--    invoke-static {}, Landroid/os/Debug;->getGpuPrivateMemoryKb()J
-+    const-wide/16 v19, -0x1
- 
-     .line 1172
-     .line 1173
-     .line 1174
--    move-result-wide v19
-+
- 
-     .line 1175
-     cmp-long v5, v19, v17
+-    invoke-super {p0, p1}, Landroid/os/Handler;->handleMessage(Landroid/os/Message;)V
+-    return-void
++    # Safely handle GPU/UI messages on A04
++    if-eqz p1, :cond_done
++    invoke-super {p0, p1}, Landroid/os/Handler;->handleMessage(Landroid/os/Message;)V
++    :cond_done
++    return-void
+ .end method
