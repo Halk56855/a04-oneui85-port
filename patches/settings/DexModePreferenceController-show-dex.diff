@@ -1,11 +1,13 @@
---- a/DexModePreferenceController.smali
-+++ b/DexModePreferenceController.smali
-@@ -358,7 +358,7 @@
-     move-result v0
+--- a/smali/com/android/settings/display/DexModePreferenceController.smali
++++ b/smali/com/android/settings/display/DexModePreferenceController.smali
+@@ -1,8 +1,9 @@
+ # DexModePreferenceController availability check for Galaxy A04 (a04)
+ .method public getAvailabilityStatus()I
+     .locals 1
  
-     .line 25
--    if-nez v0, :cond_1
-+    goto :cond_1
- 
-     .line 26
-     .line 27
+-    const/4 v0, 0x3
+-    return v0
++    # Show DeX preference entry on Galaxy A04 One UI 8.5 port
++    const/4 v0, 0x0
++    return v0
+ .end method
