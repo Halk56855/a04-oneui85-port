@@ -1,53 +1,15 @@
---- a/IcccManagerService.smali
-+++ b/IcccManagerService.smali
-@@ -428,48 +428,9 @@
- .method public final declared-synchronized getDeviceInfo([B)[B
+--- a/smali_classes2/com/android/server/IcccManagerService.smali
++++ b/smali_classes2/com/android/server/IcccManagerService.smali
+@@ -1,10 +1,12 @@
+ # IcccManagerService patch for Galaxy A04 (SM-A045F / MT6765)
+ .method public getIcccInfo([B)[B
      .locals 1
+     .param p1, "data"    # [B
  
--    .line 1
--    monitor-enter p0
+-    invoke-direct {p0, p1}, Lcom/android/server/IcccManagerService;->nativeGetIcccInfo([B)[B
+-    move-result-object v0
+-    return-object v0
++    # Return neutral status on A04 (a04) port
 +    const/4 v0, 0x0
- 
--    .line 2
--    :try_start_0
--    const-string/jumbo v0, "getDeviceInfo"
--
--    .line 3
--    .line 4
--    .line 5
--    invoke-static {v0}, Lcom/android/server/IcccManagerService;->checkCallerPermissionFor(Ljava/lang/String;)V
--
--    .line 6
--    .line 7
--    .line 8
--    invoke-static {p1}, Lcom/android/server/IcccManagerService;->iccc_device_info([B)[B
--
--    .line 9
--    .line 10
--    .line 11
--    move-result-object p1
--    :try_end_0
--    .catchall {:try_start_0 .. :try_end_0} :catchall_0
--
--    .line 12
--    monitor-exit p0
--
--    .line 13
--    return-object p1
--
--    .line 14
--    :catchall_0
--    move-exception p1
--
--    .line 15
--    :try_start_1
--    monitor-exit p0
--    :try_end_1
--    .catchall {:try_start_1 .. :try_end_1} :catchall_0
--
--    .line 16
--    throw p1
 +    return-object v0
  .end method
- 
- .method public final declared-synchronized getDeviceStatus(I[B)[B
