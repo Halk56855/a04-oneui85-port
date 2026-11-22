@@ -8,9 +8,17 @@ on:
         required: true
         default: 'all'
       system_port_url:
-        description: 'Optional direct URL to prepared system archive (.tar.gz / .zip / .img)'
+        description: 'Optional direct URL to prepared One UI 8.5 system archive (.tar.gz / .zip / .img)'
         required: false
         default: ''
+      super_size:
+        description: 'Super partition size in bytes (default: 8053063680)'
+        required: false
+        default: '8053063680'
+      super_group_limit:
+        description: 'Dynamic partitions group size limit in bytes (default: 8048869376)'
+        required: false
+        default: '8048869376'
 
 jobs:
   build:
@@ -41,10 +49,6 @@ jobs:
           git clone --depth=1 https://github.com/A04-Trees-and-ROMs/android_vendor_samsung_a04.git ~/a04_trees/vendor
           git clone --depth=1 https://github.com/A04-Trees-and-ROMs/android_kernel_samsung_a04.git ~/a04_trees/kernel
 
-          echo "--- Current repo structure (scripts, patches, installer) ---"
-          ls -la "$GITHUB_WORKSPACE/repo"
-          find "$GITHUB_WORKSPACE/repo" -maxdepth 3 -not -path '*/.*'
-
       - name: Download GCC & Clang Toolchain
         run: |
           set -e
@@ -67,13 +71,14 @@ jobs:
       - name: Adapt repo scripts & patches to Galaxy A04
         run: |
           set -e
-          mkdir -p ~/work/out ~/work/sys85/system ~/work/sys85/config ~/work/vendor_src ~/work/a04_adapted_port
-          cp -r "$GITHUB_WORKSPACE/repo/." ~/work/a04_adapted_port/
+          mkdir -p ~/a04port/work/port ~/a04port/work/out ~/a04port/work/stock/super ~/a04port/logs ~/work/sys85/system ~/work/sys85/config ~/work/vendor_src
+          cp -r "$GITHUB_WORKSPACE/repo/." ~/a04port/work/adapted_repo/
 
-          find ~/work/a04_adapted_port -type f \
+          find ~/a04port/work/adapted_repo -type f \
             \( -name "*.sh" -o -name "*.py" -o -name "*.prop" -o -name "*.json" -o -name "*.txt" -o -name "*.md" \) \
             -not -path "*/.git/*" \
             -exec sed -i \
+              -e 's/a71port/a04port/g' \
               -e 's/a71/a04/g' \
               -e 's/A71/A04/g' \
               -e 's/SM-A715F/SM-A045F/g' \
@@ -81,9 +86,9 @@ jobs:
               -e 's/sm7150/mt6765/g' \
               -e 's/SM7150/MT6765/g' {} + 2>/dev/null || true
 
-          if [ -d ~/work/a04_adapted_port/patches/config ]; then
-            find ~/a04_trees/device -name "*fstab*" -exec cp {} ~/work/a04_adapted_port/patches/config/ \; 2>/dev/null || true
-            find ~/a04_trees/device -name "*vintf*" -exec cp {} ~/work/a04_adapted_port/patches/config/ \; 2>/dev/null || true
+          if [ -d ~/a04port/work/adapted_repo/patches/config ]; then
+            find ~/a04_trees/device -name "*fstab*" -exec cp {} ~/a04port/work/adapted_repo/patches/config/ \; 2>/dev/null || true
+            find ~/a04_trees/device -name "*vintf*" -exec cp {} ~/a04port/work/adapted_repo/patches/config/ \; 2>/dev/null || true
           fi
 
           if [ -n "${{ inputs.system_port_url }}" ]; then
@@ -100,50 +105,62 @@ jobs:
             cp -r ~/a04_trees/vendor/proprietary/vendor/* ~/work/vendor_src/
           fi
 
-          find ~/work/a04_adapted_port ~/a04_trees/device -name "*system*file_contexts*" -exec cp {} ~/work/sys85/config/system_file_contexts \; 2>/dev/null || true
-          find ~/work/a04_adapted_port ~/a04_trees/device -name "*vendor*file_contexts*" -exec cp {} ~/work/sys85/config/vendor_file_contexts \; 2>/dev/null || true
+          [ -n "$(ls -A ~/work/sys85/system 2>/dev/null)" ] && mkdir -p ~/a04port/work/port/system && cp -r ~/work/sys85/system/. ~/a04port/work/port/system/
+          [ -n "$(ls -A ~/work/vendor_src 2>/dev/null)" ] && cp -r ~/work/vendor_src/. ~/a04port/work/port/vendor/
+
+          find ~/a04port/work/adapted_repo ~/a04_trees/device -name "*system*file_contexts*" -exec cp {} ~/work/sys85/config/system_file_contexts \; 2>/dev/null || true
+          find ~/a04port/work/adapted_repo ~/a04_trees/device -name "*vendor*file_contexts*" -exec cp {} ~/work/sys85/config/vendor_file_contexts \; 2>/dev/null || true
 
           [ -f ~/work/sys85/config/system_file_contexts ] || echo '/system(/.*)? u:object_r:system_file:s0' > ~/work/sys85/config/system_file_contexts
           [ -f ~/work/sys85/config/vendor_file_contexts ] || echo '/vendor(/.*)? u:object_r:vendor_file:s0' > ~/work/sys85/config/vendor_file_contexts
 
-      - name: Build EROFS images (system, vendor, product)
+      - name: Build EROFS & Super images for Galaxy A04
         run: |
           set -e
           TARGET="${{ inputs.target }}"
           MKFS=$(command -v mkfs.erofs)
 
-          build_system() {
-            if [ -n "$(ls -A ~/work/sys85/system 2>/dev/null)" ]; then
-              sed -i 's/\r$//' ~/work/sys85/config/system_file_contexts
-              sed -i '/^\s*$/d' ~/work/sys85/config/system_file_contexts
-              "$MKFS" -zlz4hc --mount-point=/system --force-uid=0 --force-gid=0 --file-contexts="$HOME/work/sys85/config/system_file_contexts" "$HOME/work/out/system_new.img" "$HOME/work/sys85/system"
+          build_partition_erofs() {
+            local part="$1"
+            local src="$2"
+            local fc="$3"
+            local dst="$4"
+            if [ -n "$(ls -A "$src" 2>/dev/null)" ]; then
+              sed -i 's/\r$//' "$fc"
+              sed -i '/^\s*$/d' "$fc"
+              "$MKFS" -zlz4hc,9 --mount-point="/$part" --force-uid=0 --force-gid=0 --file-contexts="$fc" "$dst" "$src"
             else
-              echo "Skip system_new.img: ~/work/sys85/system is empty"
+              echo "Skip $dst: $src is empty"
             fi
           }
 
-          build_vendor() {
-            if [ -n "$(ls -A ~/work/vendor_src 2>/dev/null)" ]; then
-              sed -i 's/\r$//' ~/work/sys85/config/vendor_file_contexts
-              sed -i '/^\s*$/d' ~/work/sys85/config/vendor_file_contexts
-              "$MKFS" -zlz4hc --mount-point=/vendor --force-uid=0 --force-gid=0 --file-contexts="$HOME/work/sys85/config/vendor_file_contexts" "$HOME/work/out/vendor_new.img" "$HOME/work/vendor_src"
-            else
-              echo "Skip vendor_new.img: ~/work/vendor_src is empty"
-            fi
-          }
-
-          build_product() {
+          if [ "$TARGET" = "system" ] || [ "$TARGET" = "all" ]; then
+            build_partition_erofs "system" "$HOME/work/sys85/system" "$HOME/work/sys85/config/system_file_contexts" "$HOME/a04port/work/out/system.img"
+          fi
+          if [ "$TARGET" = "vendor" ] || [ "$TARGET" = "all" ]; then
+            build_partition_erofs "vendor" "$HOME/work/vendor_src" "$HOME/work/sys85/config/vendor_file_contexts" "$HOME/a04port/work/out/vendor.img"
+          fi
+          if [ "$TARGET" = "product" ] || [ "$TARGET" = "all" ]; then
             mkdir -p ~/work/emptyprod
             echo '/product(/.*)? u:object_r:system_file:s0' > ~/work/emptyprod_fc
-            "$MKFS" -zlz4hc --mount-point=/product --force-uid=0 --force-gid=0 --file-contexts="$HOME/work/emptyprod_fc" "$HOME/work/out/product_empty.img" "$HOME/work/emptyprod"
-          }
+            "$MKFS" -zlz4hc,9 --mount-point=/product --force-uid=0 --force-gid=0 --file-contexts="$HOME/work/emptyprod_fc" "$HOME/a04port/work/out/product.img" "$HOME/work/emptyprod"
+          fi
 
-          case "$TARGET" in
-            system)  build_system ;;
-            vendor)  build_vendor ;;
-            product) build_product ;;
-            all)     build_system; build_vendor; build_product ;;
-          esac
+          if [ "$TARGET" = "all" ] && command -v lpmake >/dev/null 2>&1 && [ -f ~/a04port/work/out/system.img ] && [ -f ~/a04port/work/out/vendor.img ] && [ -f ~/a04port/work/out/product.img ]; then
+            SUPER_SIZE="${{ inputs.super_size }}"
+            GROUP_LIMIT="${{ inputs.super_group_limit }}"
+            TOTAL_SZ=$(( $(stat -c %s ~/a04port/work/out/system.img) + $(stat -c %s ~/a04port/work/out/vendor.img) + $(stat -c %s ~/a04port/work/out/product.img) ))
+            if [ "$TOTAL_SZ" -le "$GROUP_LIMIT" ]; then
+              lpmake --metadata-size 65536 --metadata-slots 2 --super-name super \
+                --device "super:${SUPER_SIZE}" --group "mtk_dynamic_partitions:${GROUP_LIMIT}" \
+                --partition system:readonly:$(stat -c %s ~/a04port/work/out/system.img):mtk_dynamic_partitions --image system="$HOME/a04port/work/out/system.img" \
+                --partition vendor:readonly:$(stat -c %s ~/a04port/work/out/vendor.img):mtk_dynamic_partitions --image vendor="$HOME/a04port/work/out/vendor.img" \
+                --partition product:readonly:$(stat -c %s ~/a04port/work/out/product.img):mtk_dynamic_partitions --image product="$HOME/a04port/work/out/product.img" \
+                --output ~/a04port/work/out/super.raw.img
+            else
+              echo "Skip super.raw.img: partitions size ($TOTAL_SZ) exceeds group limit ($GROUP_LIMIT)"
+            fi
+          fi
 
       - name: Build A04 Kernel & boot.img
         run: |
@@ -174,14 +191,14 @@ jobs:
 
               make O=out CC="$CLANG_DIR/clang" HOSTCC="$CLANG_DIR/clang" HOSTLDFLAGS="-fuse-ld=lld" "$CFG_NAME"
               make -j"$(nproc)" O=out CC="$CLANG_DIR/clang" HOSTCC="$CLANG_DIR/clang" HOSTLDFLAGS="-fuse-ld=lld" LD="$CLANG_DIR/ld.lld" AR="$CLANG_DIR/llvm-ar" NM="$CLANG_DIR/llvm-nm" OBJCOPY="$CLANG_DIR/llvm-objcopy" OBJDUMP="$CLANG_DIR/llvm-objdump" STRIP="$CLANG_DIR/llvm-strip"
-              find out/arch/arm64/boot -maxdepth 1 -name "Image*" -exec cp {} ~/work/out/ \;
+              find out/arch/arm64/boot -maxdepth 1 -name "Image*" -exec cp {} ~/a04port/work/out/ \;
 
               KIMG=$(find out/arch/arm64/boot -maxdepth 1 -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" | head -n 1)
               if [ -n "$KIMG" ] && command -v mkbootimg >/dev/null 2>&1; then
                 mkdir -p ~/work/ramdisk_tmp
                 echo "boot_placeholder" > ~/work/ramdisk_tmp/init
                 (cd ~/work/ramdisk_tmp && find . | cpio -o -H newc | gzip > ~/work/ramdisk.cpio.gz)
-                mkbootimg --kernel "$KIMG" --ramdisk ~/work/ramdisk.cpio.gz --header_version 2 --os_version 16.0.0 --os_patch_level 2026-11 -o ~/work/out/boot.img || true
+                mkbootimg --kernel "$KIMG" --ramdisk ~/work/ramdisk.cpio.gz --header_version 2 --os_version 16.0.0 --os_patch_level 2026-11 -o ~/a04port/work/out/boot.img || true
               fi
             else
               echo "No A04/MT6765 defconfig found automatically; inspect arch/arm64/configs"
@@ -193,5 +210,5 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: a04-oneui85-build-${{ inputs.target }}
-          path: ~/work/out/*
+          path: ~/a04port/work/out/*
           if-no-files-found: warn
