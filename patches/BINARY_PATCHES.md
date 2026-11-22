@@ -1,6 +1,9 @@
-# Binary patches (file offset: original bytes -> new bytes)
+# Binary Patches for Galaxy A04 (SM-A045F / MT6765)
 
-- system/bin/vold @ 0x94d60: 290100b4 -> 09000014
-  Branch past the auth-token rejection in VoldNativeService::unlockCeStorage, so the PIN unlocks storage after a framework restart.
-- system/lib64/libstagefright.so @ 0xed2a0: 02408052 -> e21f8052
-  fread count 512 -> 255 (fixes a FORTIFY abort in ACodec on this platform).
+Do NOT apply Qualcomm/SM7150 byte offsets directly to Galaxy A04 binaries.
+Verify every offset against the stock A04 firmware downloaded via `samloader-rs` before patching.
+
+## Verification steps
+1. Extract stock A04 binaries (`vold`, `libstagefright.so`, etc.) from the firmware downloaded with `samloader-rs`.
+2. Inspect target functions/bytes with `readelf`, `objdump`, or `xxd` on the exact A04 binary build.
+3. Only apply verified byte patches after backing up original files and stock firmware.
