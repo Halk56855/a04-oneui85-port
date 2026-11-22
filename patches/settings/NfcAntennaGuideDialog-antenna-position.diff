@@ -1,11 +1,12 @@
---- a/NfcAntennaGuideDialog.smali
-+++ b/NfcAntennaGuideDialog.smali
-@@ -254,7 +254,7 @@
-     .line 96
-     .line 97
-     .line 98
--    const-string v1, "1"
-+    const-string v1, "2"
+--- a/smali/com/android/settings/nfc/NfcAntennaGuideDialog.smali
++++ b/smali/com/android/settings/nfc/NfcAntennaGuideDialog.smali
+@@ -1,8 +1,9 @@
+ # NfcAntennaGuideDialog position text for Galaxy A04 (SM-A045F)
+ .method private getGuideText()Ljava/lang/String;
+     .locals 1
  
-     .line 99
-     .line 100
+-    const-string v0, "NFC antenna is located near the back of SM-A715F."
+-    return-object v0
++    const-string v0, "NFC antenna guide for Galaxy A04 (SM-A045F)."
++    return-object v0
+ .end method
