@@ -1,4 +1,4 @@
-name: Galaxy A04 One UI 8.5 Build (samloader-rs)
+name: Galaxy A04 One UI 8.5 Build (topjohnwu/samloader-rs)
 
 on:
   workflow_dispatch:
@@ -56,7 +56,7 @@ jobs:
         with:
           path: repo
 
-      - name: Install build tools & Rust/Cargo for samloader-rs
+      - name: Install build tools & Rust/Cargo
         run: |
           set -e
           sudo apt-get update
@@ -64,19 +64,18 @@ jobs:
             git bc bison flex libssl-dev make libc6-dev libncurses5-dev \
             binutils-aarch64-linux-gnu erofs-utils android-sdk-libsparse-utils \
             mkbootimg cpio zip unzip curl wget xz-utils lz4 file attr python3 \
-            cargo rustc pkg-config
+            cargo rustc pkg-config libssl-dev
 
-      - name: Install samloader-rs
+      - name: Install samloader-rs from topjohnwu/samloader-rs.git
         run: |
           set -e
-          if ! command -v samloader-rs >/dev/null 2>&1; then
-            cargo install samloader-rs --locked || cargo install samloader-rs
-          fi
+          cargo install --git https://github.com/topjohnwu/samloader-rs.git --locked || \
+          cargo install --git https://github.com/topjohnwu/samloader-rs.git
           export PATH="$HOME/.cargo/bin:$PATH"
           command -v samloader-rs
           samloader-rs --help || true
 
-      - name: Download & extract stock A04 firmware with samloader-rs
+      - name: Download & extract stock A04 firmware via samloader-rs
         env:
           SAMLOADER_IMEI: "${{ secrets.SAMLOADER_IMEI }}"
           SAMLOADER_SERIAL: "${{ secrets.SAMLOADER_SERIAL }}"
@@ -92,7 +91,6 @@ jobs:
 
           cd ~/a04_stock/dl
 
-          # Try common samloader-rs download invocations depending on CLI version
           if [ -n "$IMEI" ] && [ -n "$SERIAL" ]; then
             samloader-rs download -m "$MODEL" -r "$CSC" -i "$IMEI" -s "$SERIAL" -O . || \
             samloader-rs -m "$MODEL" -r "$CSC" -i "$IMEI" -s "$SERIAL" download -o . || true
@@ -104,7 +102,6 @@ jobs:
             samloader-rs -m "$MODEL" -r "$CSC" download -o . || true
           fi
 
-          # Unpack any zip/tar/enc archives produced into ~/a04_stock/extracted
           for f in ~/a04_stock/dl/*; do
             [ -f "$f" ] || continue
             case "$f" in
@@ -113,19 +110,16 @@ jobs:
             esac
           done
 
-          # Extract AP tar if present inside extracted files
           AP_TAR=$(find ~/a04_stock/extracted -maxdepth 2 -name "AP_*.tar*" | head -n 1)
           if [ -n "$AP_TAR" ]; then
             tar -xf "$AP_TAR" -C ~/a04_stock/extracted/ || true
           fi
 
-          # Decompress lz4 images (boot, dtbo, super)
           cd ~/a04_stock/extracted
           for lz in boot.img.lz4 dtbo.img.lz4 super.img.lz4; do
             [ -f "$lz" ] && lz4 -d -f "$lz" "${lz%.lz4}" || true
           done
 
-          # Convert super.img to raw if sparse
           if [ -f ~/a04_stock/extracted/super.img ]; then
             if file ~/a04_stock/extracted/super.img | grep -qi "sparse"; then
               simg2img ~/a04_stock/extracted/super.img ~/a04port/work/stock/super/super_stock.raw.img
