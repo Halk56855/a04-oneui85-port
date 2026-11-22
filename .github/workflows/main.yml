@@ -1,4 +1,4 @@
-name: Build One UI 8.5 Port for Galaxy A04 (SM-A045F)
+name: Galaxy A04 One UI 8.5 Build (samloader-rs)
 
 on:
   workflow_dispatch:
@@ -7,16 +7,28 @@ on:
         description: 'Build target (system | vendor | product | kernel | boot | all)'
         required: true
         default: 'all'
+      stock_model:
+        description: 'Stock device model (default: SM-A045F)'
+        required: true
+        default: 'SM-A045F'
+      stock_csc:
+        description: 'Stock CSC region code (e.g. ACR, EGY, XSG, INS)'
+        required: true
+        default: 'ACR'
+      stock_imei:
+        description: 'Optional IMEI if required by firmware/samloader-rs'
+        required: false
+        default: ''
+      stock_serial:
+        description: 'Optional Serial if required by firmware/samloader-rs'
+        required: false
+        default: ''
       system_port_url:
         description: 'Optional direct URL to prepared One UI 8.5 system archive (.tar.gz / .zip / .img)'
         required: false
         default: ''
-      stock_super_url:
-        description: 'Optional direct URL to stock A04 super.img (.img / .lz4 / .tar.gz / .zip) to auto-detect super size'
-        required: false
-        default: ''
       super_size:
-        description: 'Super partition size in bytes (default: 8053063680)'
+        description: 'Fallback super size in bytes if stock super is not extracted (default: 8053063680)'
         required: false
         default: '8053063680'
       super_group_limit:
@@ -44,14 +56,89 @@ jobs:
         with:
           path: repo
 
-      - name: Install required packages
+      - name: Install build tools & Rust/Cargo for samloader-rs
         run: |
           set -e
           sudo apt-get update
           sudo apt-get install -y \
             git bc bison flex libssl-dev make libc6-dev libncurses5-dev \
             binutils-aarch64-linux-gnu erofs-utils android-sdk-libsparse-utils \
-            mkbootimg cpio zip unzip curl wget xz-utils lz4 file attr python3
+            mkbootimg cpio zip unzip curl wget xz-utils lz4 file attr python3 \
+            cargo rustc pkg-config
+
+      - name: Install samloader-rs
+        run: |
+          set -e
+          if ! command -v samloader-rs >/dev/null 2>&1; then
+            cargo install samloader-rs --locked || cargo install samloader-rs
+          fi
+          export PATH="$HOME/.cargo/bin:$PATH"
+          command -v samloader-rs
+          samloader-rs --help || true
+
+      - name: Download & extract stock A04 firmware with samloader-rs
+        env:
+          SAMLOADER_IMEI: "${{ secrets.SAMLOADER_IMEI }}"
+          SAMLOADER_SERIAL: "${{ secrets.SAMLOADER_SERIAL }}"
+        run: |
+          set -e
+          export PATH="$HOME/.cargo/bin:$PATH"
+          mkdir -p ~/a04_stock/dl ~/a04_stock/extracted ~/a04port/work/kernel ~/a04port/work/stock/super ~/a04port/logs
+
+          MODEL="${{ inputs.stock_model }}"
+          CSC="${{ inputs.stock_csc }}"
+          IMEI="${{ inputs.stock_imei || env.SAMLOADER_IMEI }}"
+          SERIAL="${{ inputs.stock_serial || env.SAMLOADER_SERIAL }}"
+
+          cd ~/a04_stock/dl
+
+          # Try common samloader-rs download invocations depending on CLI version
+          if [ -n "$IMEI" ] && [ -n "$SERIAL" ]; then
+            samloader-rs download -m "$MODEL" -r "$CSC" -i "$IMEI" -s "$SERIAL" -O . || \
+            samloader-rs -m "$MODEL" -r "$CSC" -i "$IMEI" -s "$SERIAL" download -o . || true
+          elif [ -n "$IMEI" ]; then
+            samloader-rs download -m "$MODEL" -r "$CSC" -i "$IMEI" -O . || \
+            samloader-rs -m "$MODEL" -r "$CSC" -i "$IMEI" download -o . || true
+          else
+            samloader-rs download -m "$MODEL" -r "$CSC" -O . || \
+            samloader-rs -m "$MODEL" -r "$CSC" download -o . || true
+          fi
+
+          # Unpack any zip/tar/enc archives produced into ~/a04_stock/extracted
+          for f in ~/a04_stock/dl/*; do
+            [ -f "$f" ] || continue
+            case "$f" in
+              *.zip) unzip -o -q "$f" -d ~/a04_stock/extracted/ || true ;;
+              *.tar.md5|*.tar) tar -xf "$f" -C ~/a04_stock/extracted/ || true ;;
+            esac
+          done
+
+          # Extract AP tar if present inside extracted files
+          AP_TAR=$(find ~/a04_stock/extracted -maxdepth 2 -name "AP_*.tar*" | head -n 1)
+          if [ -n "$AP_TAR" ]; then
+            tar -xf "$AP_TAR" -C ~/a04_stock/extracted/ || true
+          fi
+
+          # Decompress lz4 images (boot, dtbo, super)
+          cd ~/a04_stock/extracted
+          for lz in boot.img.lz4 dtbo.img.lz4 super.img.lz4; do
+            [ -f "$lz" ] && lz4 -d -f "$lz" "${lz%.lz4}" || true
+          done
+
+          # Convert super.img to raw if sparse
+          if [ -f ~/a04_stock/extracted/super.img ]; then
+            if file ~/a04_stock/extracted/super.img | grep -qi "sparse"; then
+              simg2img ~/a04_stock/extracted/super.img ~/a04port/work/stock/super/super_stock.raw.img
+            else
+              cp ~/a04_stock/extracted/super.img ~/a04port/work/stock/super/super_stock.raw.img
+            fi
+            command -v lpdump >/dev/null 2>&1 && lpdump ~/a04port/work/stock/super/super_stock.raw.img > ~/a04port/logs/stock-super-lpdump.txt || true
+          fi
+
+          [ -f ~/a04_stock/extracted/boot.img ] && cp ~/a04_stock/extracted/boot.img ~/a04port/work/kernel/boot.img
+          [ -f ~/a04_stock/extracted/dtbo.img ] && cp ~/a04_stock/extracted/dtbo.img ~/a04port/work/kernel/dtbo.img
+
+          ls -lh ~/a04port/work/stock/super/ ~/a04port/work/kernel/ 2>/dev/null || true
 
       - name: Checkout Galaxy A04 trees
         run: |
@@ -80,7 +167,7 @@ jobs:
             mv host/linux-x86/clang-r383902/clang-r383902/* host/linux-x86/clang-r383902/
           fi
 
-      - name: Prepare workspace & adapt scripts/patches to Galaxy A04
+      - name: Prepare port workspace & adapt repo to Galaxy A04
         run: |
           set -e
           mkdir -p \
@@ -89,7 +176,6 @@ jobs:
             ~/a04port/work/port/product \
             ~/a04port/work/out \
             ~/a04port/work/kernel \
-            ~/a04port/work/stock/super \
             ~/a04port/release \
             ~/a04port/logs \
             ~/work/sys85/system \
@@ -109,30 +195,6 @@ jobs:
               -e 's/a715f/a045f/g' \
               -e 's/sm7150/mt6765/g' \
               -e 's/SM7150/MT6765/g' {} + 2>/dev/null || true
-
-          if [ -n "${{ inputs.stock_super_url }}" ]; then
-            mkdir -p ~/work/dl_stock
-            wget -q --show-progress "${{ inputs.stock_super_url }}" -O ~/work/dl_stock/stock_pkg
-            case "${{ inputs.stock_super_url }}" in
-              *.zip) unzip -q ~/work/dl_stock/stock_pkg -d ~/work/dl_stock/unpacked || true ;;
-              *.tar.gz|*.tgz) mkdir -p ~/work/dl_stock/unpacked && tar -xzf ~/work/dl_stock/stock_pkg -C ~/work/dl_stock/unpacked || true ;;
-              *.tar.xz) mkdir -p ~/work/dl_stock/unpacked && tar -xJf ~/work/dl_stock/stock_pkg -C ~/work/dl_stock/unpacked || true ;;
-              *.lz4) lz4 -d -f ~/work/dl_stock/stock_pkg ~/work/dl_stock/super.img || true ;;
-              *) cp ~/work/dl_stock/stock_pkg ~/work/dl_stock/super.img ;;
-            esac
-            FOUND_SUP=$(find ~/work/dl_stock -name "*super*.img*" -o -name "super*" | head -n 1)
-            if [ -n "$FOUND_SUP" ]; then
-              case "$FOUND_SUP" in
-                *.lz4) lz4 -d -f "$FOUND_SUP" ~/work/dl_stock/super_dec.img && FOUND_SUP=~/work/dl_stock/super_dec.img ;;
-              esac
-              if file "$FOUND_SUP" | grep -qi "sparse"; then
-                simg2img "$FOUND_SUP" ~/a04port/work/stock/super/super_stock.raw.img
-              else
-                cp "$FOUND_SUP" ~/a04port/work/stock/super/super_stock.raw.img
-              fi
-              command -v lpdump >/dev/null 2>&1 && lpdump ~/a04port/work/stock/super/super_stock.raw.img > ~/a04port/logs/stock-super-lpdump.txt || true
-            fi
-          fi
 
           if [ -n "${{ inputs.system_port_url }}" ]; then
             mkdir -p ~/work/dl_sys
@@ -165,7 +227,7 @@ jobs:
           SUPER_SIZE="${{ inputs.super_size }}"
           if [ -f ~/a04port/work/stock/super/super_stock.raw.img ]; then
             SUPER_SIZE=$(stat -c %s ~/a04port/work/stock/super/super_stock.raw.img)
-            echo "Using detected stock super size: $SUPER_SIZE bytes"
+            echo "Using stock super size from samloader-rs firmware: $SUPER_SIZE bytes"
           fi
           GROUP_LIMIT="${{ inputs.super_group_limit }}"
           GROUP_NAME="${{ inputs.super_group_name }}"
@@ -309,7 +371,7 @@ jobs:
             echo "Skip verify_build.sh: script or super.raw.img not available"
           fi
 
-      - name: Upload build artifacts
+      - name: Upload build outputs
         uses: actions/upload-artifact@v5
         with:
           name: a04-oneui85-build-${{ inputs.target }}
